@@ -1,0 +1,136 @@
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdio.h>  
+#include "pcap.h"  
+#include <string.h>
+
+#pragma comment (lib, "wpcap.lib")  
+
+void showpacketinfo(u_char *param, const struct pcap_pkthdr *header, const u_char *packet);
+int main()
+{
+	pcap_if_t *dev_list;
+	pcap_if_t *dev_tmp;
+	pcap_t *dev_handle;
+	int input, dev_list_len, num;
+
+	pcap_findalldevs(&dev_list, (char*)stderr);
+	dev_tmp = dev_list;
+	for (dev_list_len = 0; dev_tmp != NULL; dev_list_len++)
+	{
+		printf("%d - %s\n", dev_list_len + 1, dev_tmp->description);
+		dev_tmp = dev_tmp->next;
+	}
+	do
+	{
+		printf("Select Device : ");
+		scanf("%d", &input);
+	} while (input < 1 || input >dev_list_len);
+	dev_tmp = dev_list;
+	for (int i = 0; i < input - 1; i++)
+		dev_tmp = dev_tmp->next;
+
+	dev_handle = pcap_open_live(dev_tmp->name, 65536, 1, 100, (char*)stderr);
+
+	pcap_freealldevs(dev_list);
+
+	pcap_loop(dev_handle, 0, showpacketinfo, NULL);
+
+	pcap_close(dev_handle);
+	return 0;
+}
+
+void showpacketinfo(u_char *paramn, const struct pcap_pkthdr *header, const u_char *packet)
+{
+	static int count = 0;
+	int type = 0;
+	printf("destination MAC  : ");
+	//src dst 맥주소 구하기
+	for (int i = 0; i < 6; i++)
+	{
+		printf("%02x", packet[i]);
+		if (i != 5)
+			printf(":");
+	}
+	printf("\n");
+	printf("source MAC       : ");
+	for (int i = 0; i < 6; i++)
+	{
+		printf("%02x", packet[i+6]);
+		if (i != 5)
+			printf(":");
+	}
+	printf("\n");
+	//type 구하기
+	type += packet[12] * 0x100;
+	type += packet[13];
+
+	switch (type)
+	{
+	case 0x0800 : //IPv4
+		printf("type             : IPv4\n");
+		printf("source IP        : ");
+		for (int i = 0; i < 4; i++)
+		{
+			printf("%d", packet[i+26]);
+			if (i != 3)
+				printf(".");
+		}
+		printf("\n");
+		printf("destination IP   : ");
+		for (int i = 0; i < 4; i++)
+		{
+			printf("%d", packet[i + 30]);
+			if (i != 3)
+				printf(".");
+		}
+		printf("\n");
+		printf("source PORT      : %d\n",(packet[34]*0x100)+(packet)[35]);
+		printf("destination PORT : %d\n", (packet[36] * 0x100) + (packet)[37]);
+		break;
+
+	case 0x0806 : //ARP
+		printf("type             : ARP\n");
+		printf("sender MAC   : ");
+		for (int i = 0; i < 6; i++)
+		{
+			printf("%d", packet[i + 22]);
+			if (i != 6)
+				printf(":");
+		}
+		printf("\n");
+		printf("sender IP   : ");
+		for (int i = 0; i < 4; i++)
+		{
+			printf("%d", packet[i + 28]);
+			if (i != 4)
+				printf(".");
+		}
+		printf("\n");
+		printf("target MAC   : ");
+		for (int i = 0; i < 6; i++)
+		{
+			printf("%d", packet[i + 32]);
+			if (i != 6)
+				printf(":");
+		}
+		printf("\n");
+		printf("target IP   : ");
+		for (int i = 0; i < 4; i++)
+		{
+			printf("%d", packet[i + 36]);
+			if (i != 4)
+				printf(".");
+		}
+		printf("\n");
+		break;
+
+	case 0x86dd:
+		printf("type             : IPv6\n");
+		break;
+
+	default :
+		printf("type             : not defined\n");
+		break;
+	}
+	printf("\n");
+}

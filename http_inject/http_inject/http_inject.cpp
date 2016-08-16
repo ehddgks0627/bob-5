@@ -48,71 +48,71 @@ void packet_handler(u_char *paramn, const struct pcap_pkthdr *header, const u_ch
 {
 	int type = mntohs(packet[ETH_PROTO_OFFSET]);
 
-	u_short ipv4_proto = packet[ETH_LENGTH + IPV4_PROTO_OFFSET];
+	u_short ipv4_proto = packet[ETH_LEN + IPV4_PROTO_OFFSET];
 
 	if (type == IP4 && ipv4_proto == TCP) //IPv4이고 TCP일때
 	{
 		u_short ipv4_header_size, ipv4_total_length, tcp_header_size;
-		ipv4_header_size = packet[ETH_LENGTH + IPV4_LENGTH_OFFSET];
+		ipv4_header_size = packet[ETH_LEN + IPV4_LENGTH_OFFSET];
 		ipv4_header_size &= 0x0F;
 		ipv4_header_size *= 4;
 
-		ipv4_total_length = mntohs(packet[ETH_LENGTH + IPV4_SIZE_OFFSET]);
+		ipv4_total_length = mntohs(packet[ETH_LEN + IPV4_SIZE_OFFSET]);
 
-		tcp_header_size = packet[ETH_LENGTH + ipv4_header_size + TCP_LENGTH_OFFSET];
+		tcp_header_size = packet[ETH_LEN + ipv4_header_size + TCP_LENGTH_OFFSET];
 		tcp_header_size &= 0xF0;
 		tcp_header_size /= 0x10;
 		tcp_header_size *= 4;
 
-		if (!data_cmp((u_char*)"GET", &packet[ETH_LENGTH + ipv4_header_size + tcp_header_size], 3)) //HTTP 요청 일경우
+		if (!data_cmp((u_char*)"GET", &packet[ETH_LEN + ipv4_header_size + tcp_header_size], 3)) //HTTP 요청 일경우
 		{
-			u_char* data_forward = (u_char*)malloc(header->len);
-			u_char* data_backward = (u_char*)malloc(header->len);
+			u_char* data_forward = (u_char*)malloc(ETH_LEN + ipv4_header_size + tcp_header_size + blocked_size);
+			u_char* data_backward = (u_char*)malloc(ETH_LEN + ipv4_header_size + tcp_header_size + redirect_size);
 			u_short ipv4_chk, tcp_chk, ipv4_proto;
 			u_long tcp_pr_chk;
-			int acknowledgement = 0, sequence = 0, request_tcp_len = 0;
+			int acknowledgement=0, sequence = 0, request_tcp_len = 0;
 
-			memcpy(data_forward, packet, header->len);
-			memcpy(data_backward, packet, header->len);
+			memcpy(data_forward, packet, ETH_LEN + ipv4_header_size + tcp_header_size + blocked_size);
+			memcpy(data_backward, packet, ETH_LEN + ipv4_header_size + tcp_header_size + blocked_size);
 
 			request_tcp_len = ipv4_total_length - ipv4_header_size, tcp_header_size;
 
 			/* TCP 데이터 변조 */
-			mstrncpy(&data_forward[ETH_LENGTH + ipv4_header_size + tcp_header_size], blocked_data, blocked_size);
+			mstrncpy(&data_forward[ETH_LEN + ipv4_header_size + tcp_header_size], blocked_data, blocked_size);
 
 			/* RST 플래그 셋팅 */
-			data_forward[ETH_LENGTH + ipv4_header_size + TCP_FLAG_OFFSET] = 0b00000100;
+			data_forward[ETH_LEN + ipv4_header_size + TCP_FLAG_OFFSET] = 0b00000100;
 
 			/* IPv4 전체 길이 변환 */
 			ipv4_total_length = ipv4_header_size + tcp_header_size + blocked_size;
-			*(u_short*)&data_forward[ETH_LENGTH + IPV4_SIZE_OFFSET] = mntohs(ipv4_total_length);
+			*(u_short*)&data_forward[ETH_LEN + IPV4_SIZE_OFFSET] = mntohs(ipv4_total_length);
 
 			/* IPv4 CHECK SUM 0x00 셋팅 */
-			*(u_short*)&data_forward[ETH_LENGTH + IPV4_CHKSUM_OFFSET] = 0x0000;
+			*(u_short*)&data_forward[ETH_LEN + IPV4_CHKSUM_OFFSET] = 0x0000;
 
 			/* IPv4 CHECK SUM 계산 */
-			ipv4_chk = in_cksum((u_short*)&data_forward[ETH_LENGTH], ipv4_header_size, 0);
+			ipv4_chk = in_cksum((u_short*)&data_forward[ETH_LEN], ipv4_header_size, 0);
 
 			/* IPv4 CHECK SUM 셋팅 */
-			*(u_short*)&data_forward[ETH_LENGTH + IPV4_CHKSUM_OFFSET] = mntohs(ipv4_chk);
+			*(u_short*)&data_forward[ETH_LEN + IPV4_CHKSUM_OFFSET] = mntohs(ipv4_chk);
 
 			/* TCP CHECK SUM 0x00 셋팅 */
-			*(u_short*)&data_forward[ETH_LENGTH + ipv4_header_size + TCP_CHKSUM_OFFSET] = 0x0000;
+			*(u_short*)&data_forward[ETH_LEN + ipv4_header_size + TCP_CHKSUM_OFFSET] = 0x0000;
 
 			/* TCP CHECK SUM 계산 */
 			/* 8 is srcip and dstip size */
 			tcp_pr_chk = 0;
 			tcp_chk = 0;
-			ipv4_proto = data_forward[ETH_LENGTH + IPV4_PROTO_OFFSET];
+			ipv4_proto = data_forward[ETH_LEN + IPV4_PROTO_OFFSET];
 
 			tcp_pr_chk += ipv4_proto;
 			tcp_pr_chk += ipv4_total_length - ipv4_header_size; //tcp total length
-			tcp_chk = in_cksum((u_short*)&data_forward[ETH_LENGTH + ipv4_header_size - 8], 8 + tcp_header_size + blocked_size, tcp_pr_chk);
+			tcp_chk = in_cksum((u_short*)&data_forward[ETH_LEN + ipv4_header_size - 8], 8 + tcp_header_size + blocked_size, tcp_pr_chk);
 
 			/* TCP CHECK SUM 셋팅 */
-			*(u_short*)&data_forward[ETH_LENGTH + ipv4_header_size + TCP_CHKSUM_OFFSET] = mntohs(tcp_chk);
+			*(u_short*)&data_forward[ETH_LEN + ipv4_header_size + TCP_CHKSUM_OFFSET] = mntohs(tcp_chk);
 
-			pcap_sendpacket(dev_handle, data_forward, ETH_LENGTH + ipv4_header_size + tcp_header_size + blocked_size);
+			pcap_sendpacket(dev_handle, data_forward, ETH_LEN + ipv4_header_size + tcp_header_size + blocked_size);
 
 
 
@@ -130,57 +130,57 @@ void packet_handler(u_char *paramn, const struct pcap_pkthdr *header, const u_ch
 
 
 			/* TCP 데이터 변조 */
-			mstrncpy(&data_backward[ETH_LENGTH + ipv4_header_size + tcp_header_size], redirect_data, redirect_size);
+			mstrncpy(&data_backward[ETH_LEN + ipv4_header_size + tcp_header_size], redirect_data, redirect_size);
 
 			/* IPv4 dst, src IP 변경 */
-			mnswap(&data_backward[ETH_LENGTH + IPV4_DIP_OFFSET], &data_backward[ETH_LENGTH + IPV4_SIP_OFFSET], IP_LEN);
+			mnswap(&data_backward[ETH_LEN + IPV4_DIP_OFFSET], &data_backward[ETH_LEN + IPV4_SIP_OFFSET], IP_LEN);
 
 			/* TCP port 변경 */
-			mnswap(&data_backward[ETH_LENGTH + ipv4_header_size + TCP_SPORT_OFFSET],
-				&data_backward[ETH_LENGTH + ipv4_header_size + TCP_DPORT_OFFSET],
-				PORT_LEN);
+			mnswap(&data_backward[ETH_LEN + ipv4_header_size + TCP_SPORT_OFFSET],
+				   &data_backward[ETH_LEN + ipv4_header_size + TCP_DPORT_OFFSET],
+				   PORT_LEN);
 
 			/* TCP 시퀀스 넘버 <- -> ACK 넘버 변경 */
 			/* 시퀀스 + tcp길이 = ACK 넘버 */
-			sequence = mntohl(*(u_long*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_SEQUENCE_OFFSET]);
+			sequence = mntohl(*(u_long*)&data_backward[ETH_LEN + ipv4_header_size + TCP_SEQUENCE_OFFSET]);
 			sequence += request_tcp_len;
 
-			acknowledgement = mntohl(*(u_long*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_ACKNOWLEDGEMENT_OFFSET]);
+			acknowledgement = mntohl(*(u_long*)&data_backward[ETH_LEN + ipv4_header_size + TCP_ACKNOWLEDGEMENT_OFFSET]);
 
-			*(u_long*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_SEQUENCE_OFFSET] = mntohl(acknowledgement);
-			*(u_long*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_ACKNOWLEDGEMENT_OFFSET] = mntohl(sequence);
+			*(u_long*)&data_backward[ETH_LEN + ipv4_header_size + TCP_SEQUENCE_OFFSET] = mntohl(acknowledgement);
+			*(u_long*)&data_backward[ETH_LEN + ipv4_header_size + TCP_ACKNOWLEDGEMENT_OFFSET] = mntohl(sequence);
 
 
 			/* IPv4 전체 길이 변환 */
 			ipv4_total_length = ipv4_header_size + tcp_header_size + redirect_size;
-			*(u_short*)&data_backward[ETH_LENGTH + IPV4_SIZE_OFFSET] = mntohs(ipv4_total_length);
+			*(u_short*)&data_backward[ETH_LEN + IPV4_SIZE_OFFSET] = mntohs(ipv4_total_length);
 
 			/* IPv4 CHECK SUM 0x00 셋팅 */
-			*(u_short*)&data_backward[ETH_LENGTH + IPV4_CHKSUM_OFFSET] = 0x0000;
+			*(u_short*)&data_backward[ETH_LEN + IPV4_CHKSUM_OFFSET] = 0x0000;
 
 			/* IPv4 CHECK SUM 계산 */
-			ipv4_chk = in_cksum((u_short*)&data_backward[ETH_LENGTH], ipv4_header_size, 0);
+			ipv4_chk = in_cksum((u_short*)&data_backward[ETH_LEN], ipv4_header_size, 0);
 
 			/* IPv4 CHECK SUM 셋팅 */
-			*(u_short*)&data_backward[ETH_LENGTH + IPV4_CHKSUM_OFFSET] = mntohs(ipv4_chk);
+			*(u_short*)&data_backward[ETH_LEN + IPV4_CHKSUM_OFFSET] = mntohs(ipv4_chk);
 
 			/* TCP CHECK SUM 0x00 셋팅 */
-			*(u_short*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_CHKSUM_OFFSET] = 0x0000;
+			*(u_short*)&data_backward[ETH_LEN + ipv4_header_size + TCP_CHKSUM_OFFSET] = 0x0000;
 
 			/* TCP CHECK SUM 계산 */
 			/* 8 is srcip and dstip size */
 			tcp_pr_chk = 0;
 			tcp_chk = 0;
-			ipv4_proto = data_backward[ETH_LENGTH + IPV4_PROTO_OFFSET];
+			ipv4_proto = data_backward[ETH_LEN + IPV4_PROTO_OFFSET];
 
 			tcp_pr_chk += ipv4_proto;
 			tcp_pr_chk += ipv4_total_length - ipv4_header_size; //tcp total length
-			tcp_chk = in_cksum((u_short*)&data_backward[ETH_LENGTH + ipv4_header_size - 8], 8 + tcp_header_size + redirect_size, tcp_pr_chk);
+			tcp_chk = in_cksum((u_short*)&data_backward[ETH_LEN + ipv4_header_size - 8], 8 + tcp_header_size + redirect_size, tcp_pr_chk);
 
 			/* TCP CHECK SUM 셋팅 */
-			*(u_short*)&data_backward[ETH_LENGTH + ipv4_header_size + TCP_CHKSUM_OFFSET] = mntohs(tcp_chk);
+			*(u_short*)&data_backward[ETH_LEN + ipv4_header_size + TCP_CHKSUM_OFFSET] = mntohs(tcp_chk);
 
-			pcap_sendpacket(dev_handle, data_backward, ETH_LENGTH + ipv4_header_size + tcp_header_size + redirect_size);
+			pcap_sendpacket(dev_handle, data_backward, ETH_LEN + ipv4_header_size + tcp_header_size + redirect_size);
 			free(data_forward);
 			free(data_backward);
 		}
